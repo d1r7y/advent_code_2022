@@ -22,6 +22,7 @@ import (
 	_ "github.com/d1r7y/advent_2022/cmd/day15"
 	_ "github.com/d1r7y/advent_2022/cmd/day16"
 	_ "github.com/d1r7y/advent_2022/cmd/day17"
+	_ "github.com/d1r7y/advent_2022/cmd/day18"
 	_ "github.com/d1r7y/advent_2022/cmd/day21"
 )
 
