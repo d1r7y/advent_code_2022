@@ -321,7 +321,6 @@ func FindMinimumMovementFromPosition(world *World, p Position) int {
 		s := candidates[i]
 
 		if s.AtEnd() {
-			fmt.Printf("Found route: %s\n", s.MoveDescription())
 			return len(s.Moves)
 		}
 

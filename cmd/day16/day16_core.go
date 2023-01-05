@@ -40,7 +40,6 @@ func (l *Labyrinth) FindValve(name string) *Valve {
 }
 
 func (l *Labyrinth) SimplifyDepthFirst(valveName string, visited VisitedValve) {
-	fmt.Printf("Visiting %s\n", valveName)
 	valve := l.FindValve(valveName)
 
 	visited[valveName] = true
