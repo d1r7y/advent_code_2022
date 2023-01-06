@@ -75,21 +75,3 @@ func TestGetExteriorSurfaceArea(t *testing.T) {
 
 	assert.Equal(t, 58, g.GetExternalSurfaceArea())
 }
-
-// func TestHook(t *testing.T) {
-// 	df, err := os.Open("/Users/dirty/sources/advent_2022/input_files/day18_input.txt")
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-
-// 	defer df.Close()
-
-// 	fileContent, err := io.ReadAll(df)
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-
-// 	g := ParseCubes(string(fileContent))
-
-// 	assert.Equal(t, 58, g.GetExternalSurfaceArea())
-// }

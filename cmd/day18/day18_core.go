@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"os"
 	"strings"
-	"sync"
 )
 
 type Neighbor int
@@ -19,42 +17,6 @@ const (
 	Front
 	Back
 )
-
-func getNeighborString(n Neighbor) string {
-	neighborMap := map[Neighbor]string{
-		Top:    "Top",
-		Bottom: "Bottom",
-		Left:   "Left",
-		Right:  "Right",
-		Front:  "Front",
-		Back:   "Back",
-	}
-
-	return neighborMap[n]
-}
-
-func Backtracking(n1, n2 Neighbor) bool {
-	if n1 == Top && n2 == Bottom {
-		return true
-	}
-	if n1 == Bottom && n2 == Top {
-		return true
-	}
-	if n1 == Left && n2 == Right {
-		return true
-	}
-	if n1 == Right && n2 == Left {
-		return true
-	}
-	if n1 == Front && n2 == Back {
-		return true
-	}
-	if n1 == Back && n2 == Front {
-		return true
-	}
-
-	return false
-}
 
 type Point struct {
 	X, Y, Z int
@@ -69,21 +31,18 @@ type Offsets struct {
 }
 
 type Cube struct {
+	Empty                bool
+	ExternalAccess       bool
 	Position             Point
 	FacesExposed         int
 	ExternalFacesExposed int
 }
 
+func NewEmptyCube(p Point) *Cube {
+	return &Cube{Empty: true, Position: p}
+}
+
 type Plane []*Cube
-
-type Tristate int
-
-const (
-	// Sentinel Tristate = iota
-	False Tristate = iota
-	True
-	Pending
-)
 
 type Grid struct {
 	Bounds  Bounds
@@ -91,28 +50,8 @@ type Grid struct {
 	Min     Point
 	Max     Point
 
-	Space                       []Plane
-	Cubes                       []*Cube
-	EmptyCubeExternalPathCache  map[Point]bool
-	EmptyCubeExternalPathCache2 map[Point]Tristate
-	VisitedCube                 map[Point]Tristate
-
-	mutex           sync.Mutex
-	PendingChannels map[Point]chan bool
-}
-
-func (g *Grid) GetPendingChannel(p Point) chan bool {
-	g.mutex.Lock()
-	defer g.mutex.Unlock()
-
-	if channel, ok := g.PendingChannels[p]; ok {
-		return channel
-	}
-	// Channel doesn't exist, create it.
-	channel := make(chan bool)
-
-	g.PendingChannels[p] = channel
-	return channel
+	Space []Plane
+	Cubes []*Cube
 }
 
 func (g *Grid) GetCube(p Point) *Cube {
@@ -120,135 +59,57 @@ func (g *Grid) GetCube(p Point) *Cube {
 }
 
 func (g *Grid) GetNeighbor(point Point, neighbor Neighbor) (*Cube, bool) {
-	nc, _, valid := g.GetNeighborExtended(point, neighbor)
-	return nc, valid
-}
-
-func (g *Grid) EdgePoint(p Point) bool {
-	if p.Z == g.Max.Z {
-		return true
-	}
-	if p.Z == g.Min.Z {
-		return true
-	}
-	if p.Y == g.Max.Y {
-		return true
-	}
-	if p.Y == g.Min.Y {
-		return true
-	}
-	if p.X == g.Max.X {
-		return true
-	}
-	if p.X == g.Min.X {
-		return true
-	}
-
-	return false
-}
-
-func (g *Grid) CanReachEdge(emptyPoint Point) bool {
-
-	g.VisitedCube[emptyPoint] = Pending
-	defer func() {
-		fmt.Printf("Marking %d,%d,%d as visited\n", emptyPoint.X, emptyPoint.Y, emptyPoint.Z)
-		g.VisitedCube[emptyPoint] = True
-	}()
-
-	// Check our cache to see if this empty space has access to an edge.
-	if access, ok := g.EmptyCubeExternalPathCache[emptyPoint]; ok {
-		fmt.Printf("Cached %t for %d,%d,%d\n", access, emptyPoint.X, emptyPoint.Y, emptyPoint.Z)
-		return access
-	}
-
-	for _, n := range []Neighbor{Top, Bottom, Left, Right, Front, Back} {
-		if neighbor, point, ok := g.GetNeighborExtended(emptyPoint, n); ok {
-			fmt.Printf("%d,%d,%d [%s] recurse\n", point.X, point.Y, point.Z, getNeighborString(n))
-			if neighbor != nil {
-				continue
-			}
-			if g.VisitedCube[point] == True {
-				if access, ok := g.EmptyCubeExternalPathCache[point]; ok {
-					if access {
-						fmt.Printf("Access %t for %d,%d,%d\n", access, emptyPoint.X, emptyPoint.Y, emptyPoint.Z)
-						g.EmptyCubeExternalPathCache[emptyPoint] = true
-						return true
-					}
-				} else {
-					fmt.Printf("unexpected: visited says yes, but cache has no entry for %d,%d,%d\n", point.X, point.Y, point.Z)
-					os.Exit(0)
-				}
-			} else if g.VisitedCube[point] == False {
-				if g.CanReachEdge(point) {
-					fmt.Printf("Recursive result %d,%d,%d\n", emptyPoint.X, emptyPoint.Y, emptyPoint.Z)
-					g.EmptyCubeExternalPathCache[emptyPoint] = true
-					return true
-				}
-			} else if g.VisitedCube[point] == Pending {
-				fmt.Printf("Pending for %d,%d,%d\n", point.X, point.Y, point.Z)
-			}
-		} else {
-			fmt.Printf("Edged %t for %d,%d,%d\n", true, emptyPoint.X, emptyPoint.Y, emptyPoint.Z)
-			g.EmptyCubeExternalPathCache[emptyPoint] = true
-			return true
-		}
-	}
-
-	fmt.Printf("Can't reach for %d,%d,%d\n", emptyPoint.X, emptyPoint.Y, emptyPoint.Z)
-
-	// Can't reach an edge.
-	g.EmptyCubeExternalPathCache[emptyPoint] = false
-
-	return false
-}
-
-func (g *Grid) GetNeighborExtended(point Point, neighbor Neighbor) (*Cube, Point, bool) {
 	switch neighbor {
 	case Top:
 		if point.Z == g.Max.Z {
-			return nil, Point{}, false
+			return nil, false
 		}
 		position := Point{point.X, point.Y, point.Z + 1}
-		return g.GetCube(position), position, true
+		return g.GetCube(position), true
 	case Bottom:
 		if point.Z == g.Min.Z {
-			return nil, Point{}, false
+			return nil, false
 		}
 		position := Point{point.X, point.Y, point.Z - 1}
-		return g.GetCube(position), position, true
+		return g.GetCube(position), true
 	case Left:
 		if point.X == g.Min.X {
-			return nil, Point{}, false
+			return nil, false
 		}
 		position := Point{point.X - 1, point.Y, point.Z}
-		return g.GetCube(position), position, true
+		return g.GetCube(position), true
 	case Right:
 		if point.X == g.Max.X {
-			return nil, Point{}, false
+			return nil, false
 		}
 		position := Point{point.X + 1, point.Y, point.Z}
-		return g.GetCube(position), position, true
+		return g.GetCube(position), true
 	case Front:
 		if point.Y == g.Max.Y {
-			return nil, Point{}, false
+			return nil, false
 		}
 		position := Point{point.X, point.Y + 1, point.Z}
-		return g.GetCube(position), position, true
+		return g.GetCube(position), true
 	case Back:
 		if point.Y == g.Min.Y {
-			return nil, Point{}, false
+			return nil, false
 		}
 		position := Point{point.X, point.Y - 1, point.Z}
-		return g.GetCube(position), position, true
+		return g.GetCube(position), true
 	}
 
 	log.Panic("unknown neighbor")
-	return nil, Point{}, false
+	return nil, false
 }
 
 func (g *Grid) AddCube(cube *Cube) {
 	g.Space[cube.Position.Z+g.Offsets.Z][g.Bounds.W*(cube.Position.Y+g.Offsets.Y)+(cube.Position.X+g.Offsets.X)] = cube
 	g.Cubes = append(g.Cubes, cube)
+}
+
+func (g *Grid) AddEmptyCube(p Point) {
+	cube := NewEmptyCube(p)
+	g.Space[cube.Position.Z+g.Offsets.Z][g.Bounds.W*(cube.Position.Y+g.Offsets.Y)+(cube.Position.X+g.Offsets.X)] = cube
 }
 
 func (g *Grid) GetSurfaceArea() int {
@@ -271,6 +132,67 @@ func (g *Grid) GetExternalSurfaceArea() int {
 	return exposedFaces
 }
 
+func (g *Grid) FillExternalAccess() {
+	candidates := make([]Point, 0)
+	visited := make(map[Point]bool)
+
+	// Set ExternalAccess on all empty cubes on the border.
+	for z := g.Min.Z; z <= g.Max.Z; z++ {
+		for x := g.Min.X; x <= g.Max.X; x++ {
+			p := Point{x, g.Min.Y, z}
+			cube := g.GetCube(p)
+			if cube.Empty {
+				cube.ExternalAccess = true
+				candidates = append(candidates, p)
+				visited[p] = true
+			}
+
+			p = Point{x, g.Max.Y, z}
+			cube = g.GetCube(p)
+			if cube.Empty {
+				cube.ExternalAccess = true
+				candidates = append(candidates, p)
+				visited[p] = true
+			}
+		}
+
+		for y := g.Min.Y + 1; y <= g.Max.Y-1; y++ {
+			p := Point{g.Min.X, y, z}
+			cube := g.GetCube(p)
+			if cube.Empty {
+				cube.ExternalAccess = true
+				candidates = append(candidates, p)
+				visited[p] = true
+			}
+
+			p = Point{g.Max.X, y, z}
+			cube = g.GetCube(p)
+			if cube.Empty {
+				cube.ExternalAccess = true
+				candidates = append(candidates, p)
+				visited[p] = true
+			}
+		}
+	}
+
+	// Now, starting with the positions in candidates, flood fill ExternalAccess to all accessible empty cubes.
+	for i := 0; i < len(candidates); i++ {
+		cp := candidates[i]
+
+		for _, n := range []Neighbor{Top, Bottom, Left, Right, Front, Back} {
+			if neighbor, ok := g.GetNeighbor(cp, n); ok {
+				if neighbor.Empty {
+					if !visited[neighbor.Position] {
+						neighbor.ExternalAccess = true
+						candidates = append(candidates, neighbor.Position)
+						visited[neighbor.Position] = true
+					}
+				}
+			}
+		}
+	}
+}
+
 func ParseCube(line string) *Cube {
 	var x, y, z int
 
@@ -290,11 +212,6 @@ func ParseCubes(fileContents string) *Grid {
 	// Need to make three passes: first to get the bounds of the grid, next to allocate and store the
 	// cubes, third to calculate the exposed faces.
 	g := &Grid{}
-
-	g.EmptyCubeExternalPathCache = make(map[Point]bool)
-	g.EmptyCubeExternalPathCache2 = make(map[Point]Tristate)
-	g.VisitedCube = make(map[Point]Tristate)
-	g.PendingChannels = make(map[Point]chan bool)
 
 	g.Min.X = math.MaxInt
 	g.Max.X = math.MinInt
@@ -338,28 +255,35 @@ func ParseCubes(fileContents string) *Grid {
 
 	g.Space = make([]Plane, g.Bounds.H)
 
+	// Prefill the space with empty cubes.
+	z := g.Min.Z
 	for i := range g.Space {
 		g.Space[i] = make(Plane, g.Bounds.W*g.Bounds.D)
+		for y := g.Min.Y; y <= g.Max.Y; y++ {
+			for x := g.Min.X; x <= g.Max.X; x++ {
+				g.AddEmptyCube(Point{x, y, z})
+			}
+		}
+		z++
 	}
 
+	// Add the real cubes.
 	for _, line := range strings.Split(fileContents, "\n") {
 		g.AddCube(ParseCube(line))
 	}
 
-	for _, cube := range g.Cubes {
-		fmt.Printf("Cube: %d,%d,%d\n", cube.Position.X, cube.Position.Y, cube.Position.Z)
-		g.VisitedCube[cube.Position] = Pending
+	// Set ExternalAccess on all empty cubes on the border.  Flood fill ExternalAccess to all reachable empty cubes.
+	g.FillExternalAccess()
 
+	for _, cube := range g.Cubes {
 		for _, n := range []Neighbor{Top, Bottom, Left, Right, Front, Back} {
-			if neighbor, point, ok := g.GetNeighborExtended(cube.Position, n); ok {
-				if neighbor != nil {
+			if neighbor, ok := g.GetNeighbor(cube.Position, n); ok {
+				if !neighbor.Empty {
 					continue
 				}
 
 				cube.FacesExposed++
-				fmt.Printf("Scan: %d,%d,%d [%s]\n", point.X, point.Y, point.Z, getNeighborString(n))
-
-				if g.CanReachEdge(point) {
+				if neighbor.ExternalAccess {
 					cube.ExternalFacesExposed++
 				}
 			} else {
@@ -368,8 +292,6 @@ func ParseCubes(fileContents string) *Grid {
 				cube.FacesExposed++
 			}
 		}
-		fmt.Printf("Cube: %d,%d,%d faces %d external %d\n", cube.Position.X, cube.Position.Y, cube.Position.Z, cube.FacesExposed, cube.ExternalFacesExposed)
-		g.VisitedCube[cube.Position] = True
 	}
 
 	return g
